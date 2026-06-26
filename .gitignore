@@ -1,0 +1,31 @@
+# ── Python build / install artifacts ──
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+*.egg
+.eggs/
+
+# ── venv ──
+.venv/
+venv/
+
+# ── Runtime state / databases / logs ──
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# ── Secrets / Telegram session ──
+.env
+*.env
+!.env.example
+*.session
+*.session-journal
+
+# ── macOS / editor cruft ──
+.DS_Store
+*.swp
+.idea/
+.vscode/
