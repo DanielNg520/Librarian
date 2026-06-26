@@ -66,15 +66,29 @@ Copy-and-adapt the proven spine into Librarian; stand up `librarian.db`.
   #bathroom_selfie #outdoor` case, sidecar+base-tag merge, EXIF-sentinel→mtime
   fallback, and upload_date stamping. **All passing.**
 
-## Phase 3 — storage backends + filetype routing
-- ⬚ `backends/` Protocol; `telegram.py` (own Telethon session: send +
-  `download_media`; part-split internal, reassemble via `group_key`);
-  `rclone_backend.py` (Drive/Box/… via the `rclone` CLI); `registry.py`.
-- ⬚ Filetype → backend list config (media-bucket keyed); default
-  `["gdrive","telegram"]`. Startup guards for `rclone` + any missing dep.
-- **Verify:** a file lands in a cloud remote *and* Telegram with two `locations`
-  rows; `rclone check` passes; Telegram send is its own single-flight talker.
-- ⚠ Don't gate the Telegram fast tier on slow cloud completion.
+## Phase 3 — storage backends + filetype routing  ✅ *(done 2026-06-26)*
+- ✅ `backends/base.py` — `StorageBackend` Protocol (`store/fetch/verify/exists`)
+  + `Locator` + `BackendError`/`BackendUnavailable`. The verify-semantics split
+  (hash-verifying `durable` backends vs Telegram presence-only) is the contract
+  that gates offload.
+- ✅ `backends/local.py` — content-addressed `LocalBackend` (durable; the
+  external-disk tier and the test reference). `backends/rclone.py` — guarded
+  `rclone` CLI wrapper (durable; any cloud). `backends/telegram.py` — own
+  Telethon session, sync-over-async, presence-only verify, lazy `telethon`
+  import + guard (oversize → BackendError; splitting a documented TODO).
+- ✅ `backends/registry.py` — name→backend, `available()` filter, `is_durable()`.
+  `routing.py` — `bucket()` + `RoutingPolicy` from `[backup.routing]` in
+  config.toml (stdlib `tomllib`, no dep); default `["gdrive","telegram"]`.
+- ✅ **Verify:** `PYTHONPATH=librarian python3 librarian/tests/test_backends.py`
+  — 28 checks: LocalBackend store→exists→verify→fetch with hash integrity +
+  tamper detection + idempotence, routing bucket/policy/config-load, registry
+  get/has/available/durability, Telegram guards + flag. `rclone` round-trip runs
+  for real via a local-path remote when the binary is present (skipped here).
+  **All passing**; backends import without eagerly loading telethon.
+- ⤳ *Deferred to Phase 4 (the consumer):* the fan-out backup PASS that iterates
+  a file's routed backends, records a `locations` row each, transitions
+  `pending → backed_up`, and parallelizes so the Telegram fast tier isn't gated
+  on slow cloud completion. Telegram part-splitting + `group_key` reassembly.
 
 ## Phase 4 — backup fan-out + offload (HSM)  *the dangerous delete*
 - ⬚ `worker.py` backup pass: for each routed backend `store()` + record a

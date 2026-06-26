@@ -22,3 +22,10 @@ def db_path() -> Path:
 
 def config_dir() -> Path:
     return Path("~/.config/librarian").expanduser()
+
+
+def config_path() -> Path:
+    """librarian's config.toml (routing, backends, …). Override with
+    $LIBRARIAN_CONFIG for tests."""
+    return Path(os.environ.get(
+        "LIBRARIAN_CONFIG", "~/.config/librarian/config.toml")).expanduser()

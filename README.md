@@ -19,7 +19,7 @@ Early build — see [PLAN.md](PLAN.md) for the phased roadmap and what's done.
 | 0 | Folder hashtags (`.tags` sidecars, layered) | ✅ |
 | 1 | Vendored spine + own `librarian.db` (`items`, `locations`, `roots`) | ✅ |
 | 2 | Photo captions (folder taxonomy + dependency-free EXIF) | ✅ |
-| 3 | Storage backends (Telegram + rclone clouds) + filetype routing | in progress |
+| 3 | Storage backends (Telegram + rclone clouds + local) + filetype routing | ✅ |
 | 4 | Backup fan-out + offload (HSM) | — |
 | 5 | Librarian bot — find / serve / restore | — |
 | 6 | Book enrichment (ISBN ladder) | — |
