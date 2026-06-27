@@ -90,15 +90,27 @@ Copy-and-adapt the proven spine into Librarian; stand up `librarian.db`.
   `pending → backed_up`, and parallelizes so the Telegram fast tier isn't gated
   on slow cloud completion. Telegram part-splitting + `group_key` reassembly.
 
-## Phase 4 — backup fan-out + offload (HSM)  *the dangerous delete*
-- ⬚ `worker.py` backup pass: for each routed backend `store()` + record a
-  `locations` row; partial failure retryable, never loses the item.
-- ⬚ Offload pass (age/disk-pressure): reclaim local file ONLY after a **durable,
-  non-Telegram** backend `verify()`s present; unlink via `DeletionGuard`; set
-  `OFFLOADED`; no placeholder. Idempotent + crash-safe (re-verify before unlink).
-- **Verify:** force offload on a cloud-verified file → gone + `OFFLOADED`, no
-  marker; a Telegram-only file is **never** offloaded.
-- ⚠ Re-verify immediately before unlink; never trust a stale `verified_at`.
+## Phase 4 — backup fan-out + offload (HSM)  ✅ *(done 2026-06-26)*  *the dangerous delete*
+- ✅ `backup.py` — `backup_item`/`backup_pass`: stores a PENDING item to every
+  routed+available backend CONCURRENTLY (fast tier not gated on slow cloud), DB
+  writes back on the main thread; durable copies verified right after store;
+  records a `locations` row each; `pending → backed_up` only when all available
+  backends hold it. Partial failure → mark_failed (attempts++, retry, then
+  FAILED at cap); successes kept so retries resume without double-storing.
+- ✅ `deletion.py` — vendored `DeletionGuard` (single unlink chokepoint, optional
+  `protect` predicate, never raises). `offload.py` — `offload_item`/`offload_pass`
+  with the integrity gate: reclaim local file ONLY after a **durable,
+  non-Telegram** backend verifies the bytes LIVE (re-verified immediately before
+  unlink — never a stale `verified_at`); set `OFFLOADED`, no placeholder.
+  Crash-safe/idempotent (file already gone + durable verified → converges).
+  Age- and disk-pressure-based selection (oldest first). `worker.run_once`
+  orchestrates backup-then-offload.
+- ✅ **Verify:** `PYTHONPATH=librarian python3 librarian/tests/test_backup.py` —
+  33 checks: fan-out (durable verified_at vs presence-only), partial-fail
+  retry+resume, max-retries→FAILED, **offload happy path (file gone, OFFLOADED,
+  no marker), Telegram-only NEVER offloaded, corruption of the durable copy
+  blocks the delete, crash-safe convergence, guard refusal, dry-run, age
+  filter.** **All passing.** Suite total: 137 checks.
 
 ## Phase 5 — librarian bot + retrieval
 - ⬚ `bot.py` (own MTProto session): `find` (FTS5 over

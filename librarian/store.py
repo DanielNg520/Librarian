@@ -138,6 +138,33 @@ class ItemStore:
         ).fetchone()
         return Item.from_row(r) if r else None
 
+    def items_by_status(self, status: Status | str, *,
+                        limit: int | None = None) -> list[Item]:
+        """All items in `status`, oldest first. The backup pass reads PENDING;
+        the offload pass reads BACKED_UP."""
+        sql = "SELECT * FROM items WHERE status = ? ORDER BY discovered_at"
+        params: list = [getattr(status, "value", status)]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        rows = self.conn.execute(sql, params).fetchall()
+        return [Item.from_row(r) for r in rows]
+
+    def mark_failed(self, item_id: int, *, error: str, max_retries: int) -> str:
+        """Record a backup failure: bump attempts; stay PENDING for a retry until
+        attempts reach max_retries, then FAILED (terminal until reset). Returns
+        the resulting status value. Mirrors the suite's retry semantics."""
+        r = self.conn.execute(
+            "SELECT attempts FROM items WHERE id = ?", (item_id,)).fetchone()
+        attempts = (r["attempts"] if r else 0) + 1
+        status = (Status.FAILED.value if attempts >= max_retries
+                  else Status.PENDING.value)
+        self.conn.execute(
+            "UPDATE items SET attempts = ?, status = ?, last_error = ? WHERE id = ?",
+            (attempts, status, error, item_id))
+        self._commit()
+        return status
+
     def count_by_status(self, status: Status | str | None = None) -> int:
         if status is None:
             r = self.conn.execute("SELECT COUNT(*) AS n FROM items").fetchone()
