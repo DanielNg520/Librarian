@@ -8,6 +8,17 @@ requires-python = ">=3.13"
 # (telethon, rclone-via-CLI, pypdf, etc.) are added per phase as they land.
 dependencies = []
 
+# All runtime deps are OPTIONAL and per-feature — Librarian degrades gracefully
+# when one is absent (a missing backend/rung is disabled, never fatal).
+[project.optional-dependencies]
+telegram = ["telethon>=1.34"]            # fast-access backend + retrieval bot
+books = ["pypdf>=4"]                     # embedded metadata + born-digital text
+books-ocr = [                            # scanned/image-only PDFs
+    "pdf2image>=1.17",                   # also needs the poppler + tesseract binaries
+    "pytesseract>=0.3",
+]
+# Online ISBN lookup uses stdlib urllib — no `requests` dependency.
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

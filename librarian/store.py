@@ -114,6 +114,24 @@ class ItemStore:
         self._commit()
         return cur.rowcount > 0
 
+    def set_caption(self, item_id: int, *, title: str | None = None,
+                    caption: str | None = None) -> None:
+        """Write back a composed title/caption (book enrichment, Phase 6). Only
+        the provided fields are updated; the items_fts trigger re-indexes them.
+        The caption is NOT hashed, so this never disturbs dedup."""
+        sets, params = [], []
+        if title is not None:
+            sets.append("title = ?")
+            params.append(title)
+        if caption is not None:
+            sets.append("caption = ?")
+            params.append(caption)
+        if not sets:
+            return
+        params.append(item_id)
+        self.conn.execute(f"UPDATE items SET {', '.join(sets)} WHERE id = ?", params)
+        self._commit()
+
     def set_status(self, item_id: int, status: Status | str) -> None:
         self.conn.execute("UPDATE items SET status = ? WHERE id = ?",
                           (getattr(status, "value", status), item_id))

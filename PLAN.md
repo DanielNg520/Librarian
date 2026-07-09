@@ -136,14 +136,32 @@ Copy-and-adapt the proven spine into Librarian; stand up `librarian.db`.
   hand-built v0 DB back-fills its FTS index on upgrade. **All passing.** Suite
   total: 170 checks.
 
-## Phase 6 — book enrichment (async, fail-soft)
-- ⬚ `captioning/book.py` + async pass (document bucket): embedded metadata →
-  text/OCR ISBN regex+checksum → Open Library / Google Books → filename ladder.
-  Startup guards for `pypdf`/`pdfminer.six`, `tesseract`+`pdf2image`, `requests`.
-- ⬚ Default: OCR on, online ISBN lookup on (only the number leaves), model
-  fallback off.
-- **Verify:** born-digital + scanned PDFs both resolve title/author/ISBN; no-ISBN
-  falls back to filename, no crash.
+## Phase 6 — book enrichment (async, fail-soft)  ✅ *(done 2026-07-08)*
+- ✅ `captioning/isbn.py` — pure, dependency-free ISBN core: ISBN-10/13 checksum
+  validation, ISBN-10→13 up-convert, and `find_isbns()` (regex candidates gated by
+  CHECKSUM, normalized to 13, de-duped) so OCR noise never triggers a bogus lookup.
+- ✅ `captioning/book.py` — the ISBN ladder, every rung guarded/injectable:
+  embedded metadata (`pypdf`), text extract (`pypdf`→`pdfminer.six`), OCR
+  (`pdf2image`+`pytesseract`), online lookup (Open Library → Google Books, **stdlib
+  urllib — no `requests`**, only the ISBN leaves), filename parse
+  (`Author - Title (Year)`), raw-stem last resort. Precedence ISBN > embedded >
+  filename > stem. `compose_book_caption()` layers folder tags on identically to
+  photos. A missing optional dep disables just that rung (logged once), never raises.
+- ✅ `enrich.py` — the async, fail-soft pass (`enrich_item`/`enrich_pass`): iterates
+  document-bucket books lacking a caption, writes `items.title` + `items.caption`
+  (re-indexed by the FTS trigger from Phase 5), swallows any per-book failure. Kept
+  OUT of ingest/backup so slow network+OCR never gate discovery or delivery.
+- ✅ Default: OCR on, online ISBN lookup on, model fallback off (not implemented —
+  the deferred opt-in). Optional deps declared as `[project.optional-dependencies]`
+  extras (`telegram`, `books`, `books-ocr`).
+- ✅ **Verify:** `python3 tests/test_book.py` — 43 checks (all optional deps ABSENT,
+  via injection): checksum edges incl. X, extraction dedup + noise rejection,
+  filename ladder, Open Library hit + Google Books fallback + both-miss/garbage,
+  **born-digital → ISBN, scanned → OCR → ISBN, ocr/online toggles, no-ISBN →
+  filename, embedded > stem, raw-stem last resort**, caption composition with
+  layered tags, and the pass (only document-books enriched, back-write + FTS
+  findable, idempotent skip, ladder-crash swallowed). **All passing.** Suite
+  total: 213 checks.
 
 ## Cross-cutting
 - ⬚ Keep `librarian/DESIGN.md` + this plan current as phases land; maintain a
