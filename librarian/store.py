@@ -27,6 +27,24 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fts_match(query: str) -> str:
+    """Turn a raw user query into a safe FTS5 MATCH expression.
+
+    We never pass user text to MATCH verbatim — bare `-`, `*`, `"`, `AND/OR/NEAR`
+    and unbalanced quotes are FTS5 operators that would either error or mean
+    something the user didn't intend. Each whitespace token is emitted as a quoted
+    prefix phrase (`"tok"*`), internal quotes doubled; tokens are ANDed (implicit).
+    A query with no alphanumeric content yields "" → the caller returns no rows.
+    """
+    tokens: list[str] = []
+    for raw in query.split():
+        cleaned = raw.strip()
+        if not any(ch.isalnum() for ch in cleaned):
+            continue
+        tokens.append('"' + cleaned.replace('"', '""') + '"*')
+    return " ".join(tokens)
+
+
 class ItemStore:
     def __init__(self, conn: sqlite3.Connection | None = None,
                  db_path: str | None = None) -> None:
@@ -164,6 +182,27 @@ class ItemStore:
             (attempts, status, error, item_id))
         self._commit()
         return status
+
+    # ── search (FTS5, Phase 5) ─────────────────────────────────────────────────
+    def search(self, query: str, *, limit: int = 20) -> list[Item]:
+        """Full-text `find` over title/caption/path/upload_date via the items_fts
+        index, best matches first (FTS5 `rank`). Returns [] for an empty/degenerate
+        query. Fail-soft: any FTS error (e.g. a build without FTS5) yields [] rather
+        than raising into the bot loop."""
+        match = _fts_match(query)
+        if not match:
+            return []
+        try:
+            rows = self.conn.execute(
+                "SELECT items.* FROM items "
+                "JOIN items_fts ON items.id = items_fts.rowid "
+                "WHERE items_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit),
+            ).fetchall()
+        except sqlite3.Error as e:
+            log.warning("store.search failed for %r: %s", query, e)
+            return []
+        return [Item.from_row(r) for r in rows]
 
     def count_by_status(self, status: Status | str | None = None) -> int:
         if status is None:

@@ -77,13 +77,47 @@ CREATE TABLE IF NOT EXISTS metadata (
 );
 """
 
+# ── v1: full-text search index (Phase 5, the retrieval `find`) ────────────────
+# An external-content FTS5 table shadowing items over the human-searchable
+# columns; `items` stays the single source of truth (content='items'), the FTS
+# table holds only the inverted index. Three triggers keep it in lock-step with
+# every INSERT/UPDATE/DELETE on items, and 'rebuild' back-fills any rows that
+# predate the migration. Tokenized unicode61 + remove_diacritics so an accented
+# caption matches an ASCII query. `path` is indexed too, so a folder name finds
+# the file even before captions are composed.
+FTS_DDL = [
+    """CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+         title, caption, path, upload_date,
+         content='items', content_rowid='id',
+         tokenize="unicode61 remove_diacritics 2"
+       )""",
+    # Back-fill from any rows that already exist (no-op on a fresh DB).
+    "INSERT INTO items_fts(items_fts) VALUES('rebuild')",
+    """CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
+         INSERT INTO items_fts(rowid, title, caption, path, upload_date)
+         VALUES (new.id, new.title, new.caption, new.path, new.upload_date);
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS items_fts_ad AFTER DELETE ON items BEGIN
+         INSERT INTO items_fts(items_fts, rowid, title, caption, path, upload_date)
+         VALUES ('delete', old.id, old.title, old.caption, old.path, old.upload_date);
+       END""",
+    """CREATE TRIGGER IF NOT EXISTS items_fts_au AFTER UPDATE ON items BEGIN
+         INSERT INTO items_fts(items_fts, rowid, title, caption, path, upload_date)
+         VALUES ('delete', old.id, old.title, old.caption, old.path, old.upload_date);
+         INSERT INTO items_fts(rowid, title, caption, path, upload_date)
+         VALUES (new.id, new.title, new.caption, new.path, new.upload_date);
+       END""",
+]
+
 # Forward-only, ordered migrations applied once each and recorded in
-# PRAGMA user_version. Empty today — the base DDL is the whole v0 schema. Future
-# additive changes append `(target_version, [statements])` here and bump
-# SCHEMA_VERSION; NEVER edit ITEMS_DDL (CREATE IF NOT EXISTS no-ops on existing
-# DBs, so an edited DDL would reach fresh installs but never existing ones).
-SCHEMA_VERSION = 0
-_MIGRATIONS: list[tuple[int, list[str]]] = []
+# PRAGMA user_version. Future additive changes append `(target_version,
+# [statements])` here and bump SCHEMA_VERSION; NEVER edit ITEMS_DDL (CREATE IF
+# NOT EXISTS no-ops on existing DBs, so an edited DDL would reach fresh installs
+# but never existing ones).
+SCHEMA_VERSION = 1
+_MIGRATIONS: list[tuple[int, list[str]]] = [
+    (1, FTS_DDL),
+]
 
 
 class SchemaVersionError(RuntimeError):

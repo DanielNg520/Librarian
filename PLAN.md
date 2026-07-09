@@ -112,13 +112,29 @@ Copy-and-adapt the proven spine into Librarian; stand up `librarian.db`.
   blocks the delete, crash-safe convergence, guard refusal, dry-run, age
   filter.** **All passing.** Suite total: 137 checks.
 
-## Phase 5 — librarian bot + retrieval
-- ⬚ `bot.py` (own MTProto session): `find` (FTS5 over
-  `title/caption/path/upload_date/tags`), `serve` (forward stored TG message
-  inline), `restore` (best backend `fetch()` → `~/Downloads`, re-verify
-  `content_hash`, `OFFLOADED → backed_up`).
-- **Verify:** offload → `find` → `restore`; bytes match by `content_hash`, lands
-  in Downloads.
+## Phase 5 — librarian bot + retrieval  ✅ *(done 2026-07-08)*
+- ✅ `schema.py` migration **v1**: external-content FTS5 `items_fts` over
+  `title/caption/path/upload_date` (tags travel inside the caption), kept in
+  lock-step with `items` by AFTER INSERT/UPDATE/DELETE triggers; `'rebuild'`
+  back-fills rows that predate the migration. `SCHEMA_VERSION` 0→1; the
+  forward-only runner applies it once and the newer-DB guard still fires.
+- ✅ `store.search()` + `_fts_match()` — user text is never passed to `MATCH`
+  verbatim: each token → a quoted prefix phrase (`"tok"*`), internal quotes
+  doubled, operator-only queries → no rows; fail-soft (any FTS error → `[]`).
+- ✅ `bot.py` — retrieval logic as plain, fakeable functions: `find` (FTS5),
+  `telegram_location`/`serve` (forward the presence-only TG copy inline, no
+  download), `restore` (durable backends first then TG fallback; fetch →
+  `~/Downloads`, **re-hash the written file against `content_hash`** — a corrupt
+  copy is discarded and the next backend tried; `OFFLOADED → backed_up` only on a
+  verified restore). `LibrarianBot` is the thin Telethon wiring (own MTProto
+  session, single-flight, lazy `telethon` import) mapping `/find /serve /restore`.
+- ✅ **Verify:** `python3 tests/test_bot.py` — 33 checks: FTS sanitizer, find by
+  filename/folder/caption + trigger re-index on edit/delete + prefix, serve
+  location pick, **restore happy path (bytes in Downloads, OFFLOADED→BACKED_UP),
+  corrupt durable copy skipped→TG fallback, all-corrupt→verify_failed (no file
+  left, status untouched), no-location, fetch-failed.** Plus a manual check that a
+  hand-built v0 DB back-fills its FTS index on upgrade. **All passing.** Suite
+  total: 170 checks.
 
 ## Phase 6 — book enrichment (async, fail-soft)
 - ⬚ `captioning/book.py` + async pass (document bucket): embedded metadata →
