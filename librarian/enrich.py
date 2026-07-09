@@ -49,19 +49,21 @@ class EnrichReport:
 def enrich_item(store: ItemStore, item: Item, *,
                 online: bool = True, ocr: bool = True,
                 fetcher: Callable[[str], str | None] | None = None,
-                enricher: Callable[..., book.BookMetadata] | None = None) -> bool:
-    """Identify one book and write its title + caption. Returns True iff a caption
-    was written. Fail-soft: any exception is logged and swallowed (returns False).
-    `enricher` is injectable for testing; default is captioning.book.enrich."""
+                enricher: Callable[..., book.BookMetadata] | None = None
+                ) -> book.BookMetadata | None:
+    """Identify one book and write its title + caption. Returns the metadata
+    written (truthy), or None when nothing was written. Fail-soft: any exception
+    is logged and swallowed (returns None). `enricher` is injectable for
+    testing; default is captioning.book.enrich."""
     path = Path(item.path)
     if not book.is_book(path):
-        return False
+        return None
     run = enricher or book.enrich
     try:
         meta = run(path, online=online, ocr=ocr, fetcher=fetcher)
     except Exception as e:                        # ladder must never crash the pass
         log.warning("enrich: ladder failed for id=%d (%s): %s", item.id, path, e)
-        return False
+        return None
 
     root = store.get_root(item.root) if item.root else None
     root_path = root["path"] if root else path.parent
@@ -72,7 +74,7 @@ def enrich_item(store: ItemStore, item: Item, *,
         meta, path, root_path, resolver=resolver, base_tags=base_tags)
     store.set_caption(item.id, title=meta.title, caption=caption or None)
     log.info("enrich: id=%d → %r (%s)", item.id, meta.title, meta.source)
-    return True
+    return meta
 
 
 def enrich_pass(store: ItemStore, *,
@@ -97,19 +99,18 @@ def enrich_pass(store: ItemStore, *,
             report.skipped += 1
             continue
         try:
-            ok = enrich_item(store, item, online=online, ocr=ocr,
-                             fetcher=fetcher, enricher=enricher)
+            meta = enrich_item(store, item, online=online, ocr=ocr,
+                               fetcher=fetcher, enricher=enricher)
         except Exception as e:                    # defensive: never abort the pass
             log.warning("enrich: unexpected error id=%d: %s", item.id, e)
             report.failed += 1
             continue
-        if not ok:
+        if meta is None:
             report.failed += 1
             continue
         report.enriched += 1
         # An ISBN-sourced record means we actually identified the book online.
-        fresh = store.get(item.id)
-        if fresh and fresh.caption and "ISBN" in fresh.caption:
+        if meta.source == "isbn":
             report.identified += 1
         if limit is not None and report.enriched >= limit:
             break

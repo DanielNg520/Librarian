@@ -19,6 +19,10 @@ books-ocr = [                            # scanned/image-only PDFs
 ]
 # Online ISBN lookup uses stdlib urllib — no `requests` dependency.
 
+# `uv run pytest` — the standalone tests/ scripts are also pytest-collectable.
+[dependency-groups]
+dev = ["pytest>=8"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

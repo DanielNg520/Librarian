@@ -244,6 +244,15 @@ class ItemStore:
         )
         self._commit()
 
+    def remove_location(self, item_id: int, backend: str) -> int:
+        """Drop one backend's claim on an item (heal pass: the copy positively
+        failed a live verify). Returns the number of rows removed (0 or 1)."""
+        cur = self.conn.execute(
+            "DELETE FROM locations WHERE item_id = ? AND backend = ?",
+            (item_id, backend))
+        self._commit()
+        return cur.rowcount
+
     def locations_for(self, item_id: int) -> list[Location]:
         rows = self.conn.execute(
             "SELECT * FROM locations WHERE item_id = ? ORDER BY backend",
