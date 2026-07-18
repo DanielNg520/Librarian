@@ -48,9 +48,11 @@ class FakeTelegram:
 
     def __init__(self):
         self._have: set[str] = set()
+        self.captions: list[str | None] = []      # records what each store saw
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         self._have.add(content_hash)
+        self.captions.append(caption)
         return Locator(self.name, content_hash)
 
     def fetch(self, locator, dest):
@@ -67,7 +69,7 @@ class FailingBackend:
     name = "boom"
     durable = True
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         raise BackendError("boom always fails")
 
     def fetch(self, locator, dest):

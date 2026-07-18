@@ -31,7 +31,14 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import exif
-from ..tags import TagResolver, slugify_tag
+from ..tags import TagResolver
+from ._compose import (  # noqa: F401 — re-exported: the folder-caption spine
+    description,
+    folder_lines,
+    merge_tags as _merge_tags,
+    path_segments,
+    segment_tags,
+)
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +46,6 @@ PHOTO_EXTENSIONS = frozenset({
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".tif", ".bmp",
     ".heic", ".heif",
 })
-
-_SEP = " · "
 
 
 def is_photo(path) -> bool:
@@ -72,42 +77,9 @@ def timestamp(path) -> tuple[str, str] | None:
     return dt.strftime("%Y%m%d"), dt.strftime("%Y-%m-%d %H:%M")
 
 
-# ── path → description / tags ──────────────────────────────────────────────
-def path_segments(path, root_path) -> list[str]:
-    """The folder segments between the root and the file (excludes the
-    filename). [] when `path` is not under `root_path`."""
-    try:
-        rel = Path(path).resolve().relative_to(Path(root_path).resolve())
-    except ValueError:
-        return []
-    return list(rel.parts[:-1])
-
-
-def description(path, root_path) -> str:
-    """Human description = path segments joined, e.g. 'selfie · outdoor'."""
-    return _SEP.join(path_segments(path, root_path))
-
-
-def segment_tags(path, root_path) -> list[str]:
-    """Each path segment slugified to a tag, in layer order, de-duplicated."""
-    out, seen = [], set()
-    for seg in path_segments(path, root_path):
-        t = slugify_tag(seg)
-        if t and t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
-
-
-def _merge_tags(*groups) -> list[str]:
-    out, seen = [], set()
-    for group in groups:
-        for t in group:
-            if t and t not in seen:
-                seen.add(t)
-                out.append(t)
-    return out
-
+# ── caption ────────────────────────────────────────────────────────────────
+# path_segments / description / segment_tags / folder_lines live in _compose
+# (imported above) — the taxonomy→caption rule is shared with book & generic.
 
 def compose_caption(
     path,
@@ -117,25 +89,13 @@ def compose_caption(
     base_tags: "list[str] | tuple[str, ...]" = (),
 ) -> str:
     """Compose the full photo caption (date line, description line, tag line).
-    Empty lines are omitted. `base_tags` are the root's raw base hashtags;
-    `resolver` supplies `.tags` sidecar tags (Phase 0). All tag sources are
-    unioned in layer order and de-duplicated."""
+    The date is EXIF DateTimeOriginal (else mtime); the description + tag lines
+    are the shared folder spine. Empty lines are omitted."""
     lines: list[str] = []
 
     ts = timestamp(path)
     if ts:
         lines.append(ts[1])
 
-    desc = description(path, root_path)
-    if desc:
-        lines.append(desc)
-
-    tags = _merge_tags(
-        (slugify_tag(b) for b in base_tags),
-        segment_tags(path, root_path),
-        resolver.tags_for(path) if resolver else (),
-    )
-    if tags:
-        lines.append(" ".join(f"#{t}" for t in tags))
-
+    lines += folder_lines(path, root_path, resolver=resolver, base_tags=base_tags)
     return "\n".join(lines)

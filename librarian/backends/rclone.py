@@ -65,7 +65,9 @@ class RcloneBackend:
         except subprocess.TimeoutExpired as e:
             raise BackendError(f"rclone {args[0]} timed out") from e
 
-    def store(self, path: Path, content_hash: str) -> Locator:
+    def store(self, path: Path, content_hash: str, *,
+              caption: str | None = None) -> Locator:
+        # Durable cloud copy = bytes only; `caption` (fast-tier text) is ignored.
         ref = self._ref_for(content_hash)
         # copyto = copy a single file to an explicit destination object.
         self._run("copyto", str(Path(path)), ref)

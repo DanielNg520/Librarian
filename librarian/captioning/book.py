@@ -44,8 +44,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import isbn as isbn_mod
-from ..tags import TagResolver, slugify_tag
-from .photo import _merge_tags, description, segment_tags
+from ..tags import TagResolver
+from ._compose import folder_lines
 
 log = logging.getLogger(__name__)
 
@@ -322,15 +322,5 @@ def compose_book_caption(
         lines.append(ml)
     if meta.isbn:
         lines.append(f"ISBN {meta.isbn}")
-    desc = description(path, root_path)
-    if desc:
-        lines.append(desc)
-
-    tags = _merge_tags(
-        (slugify_tag(b) for b in base_tags),
-        segment_tags(path, root_path),
-        resolver.tags_for(path) if resolver else (),
-    )
-    if tags:
-        lines.append(" ".join(f"#{t}" for t in tags))
+    lines += folder_lines(path, root_path, resolver=resolver, base_tags=base_tags)
     return "\n".join(lines)

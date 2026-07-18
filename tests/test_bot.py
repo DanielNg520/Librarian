@@ -51,7 +51,7 @@ class FakeTelegram:
     def __init__(self):
         self._blobs: dict[str, bytes] = {}
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         self._blobs[content_hash] = Path(path).read_bytes()
         return Locator(self.name, content_hash)
 
@@ -73,7 +73,7 @@ class WrongBytesBackend:
     name = "rot"
     durable = True
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         return Locator(self.name, content_hash)
 
     def fetch(self, locator, dest):
@@ -272,7 +272,7 @@ def test_restore_no_location() -> None:
 def test_restore_fetch_failed() -> None:
     class Boom:
         name = "boom"; durable = True
-        def store(self, p, h): return Locator(self.name, h)
+        def store(self, p, h, *, caption=None): return Locator(self.name, h)
         def fetch(self, loc, dest): raise BackendError("network down")
         def verify(self, loc, h): return True
         def exists(self, loc): return True

@@ -35,7 +35,10 @@ class LocalBackend:
     def _path_for(self, content_hash: str) -> Path:
         return self._root / content_hash[:2] / content_hash
 
-    def store(self, path: Path, content_hash: str) -> Locator:
+    def store(self, path: Path, content_hash: str, *,
+              caption: str | None = None) -> Locator:
+        # `caption` is a fast-access-tier concern; a durable content-addressed
+        # store keeps only the bytes. Accepted for a uniform seam, ignored here.
         path = Path(path)
         dest = self._path_for(content_hash)
         try:

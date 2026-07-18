@@ -5,7 +5,11 @@ The `StorageBackend` Strategy — the seam that makes Telegram just one backend
 among durable clouds. Every backend implements the same four operations so the
 backup/offload/restore logic never special-cases a provider.
 
-    store(path, content_hash)  → push bytes, return a Locator (where they landed)
+    store(path, content_hash, *, caption=None)
+                               → push bytes, return a Locator (where they landed).
+                                 `caption` is the send-time message text; the
+                                 fast-access tier (Telegram) attaches it, durable
+                                 backends ignore it (bytes are the payload there).
     fetch(locator, dest)       → pull bytes back to dest
     verify(locator, hash)      → prove the copy is present (and, where the backend
                                  can, byte-intact)
@@ -58,7 +62,8 @@ class BackendUnavailable(BackendError):
 class StorageBackend(Protocol):
     name: str
 
-    def store(self, path: Path, content_hash: str) -> Locator: ...
+    def store(self, path: Path, content_hash: str, *,
+              caption: str | None = None) -> Locator: ...
     def fetch(self, locator: Locator, dest: Path) -> Path: ...
     def verify(self, locator: Locator, content_hash: str) -> bool: ...
     def exists(self, locator: Locator) -> bool: ...

@@ -32,11 +32,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from . import captioning
 from .backends.base import BackendError, Locator, StorageBackend
 from .backends.registry import Registry
 from .models import Status
 from .routing import RoutingPolicy
 from .store import ItemStore, now_iso
+from .tags import TagResolver
 
 log = logging.getLogger(__name__)
 
@@ -50,12 +52,38 @@ class BackupOutcome(str, Enum):
     NO_BACKEND = "no_backend"    # nothing routed+available; left PENDING
 
 
-def _safe_store(backend: StorageBackend, path: Path,
-                content_hash: str) -> "tuple[Locator | None, str | None]":
-    """Run one backend.store off-thread, capturing any error as a string. A
-    backend bug must never crash the whole pass."""
+def _caption_for(store: ItemStore, item) -> str | None:
+    """Compose the send-time caption for one item from its folder taxonomy (and,
+    for books, the ISBN caption already in `items.caption`). FAIL-SOFT: any
+    problem returns None — a missing caption must never block delivery. Composed
+    HERE, at send, so a later `.tags`/folder-move edit is reflected."""
     try:
-        return backend.store(path, content_hash), None
+        if not item.root:
+            return None
+        root = store.get_root(item.root)
+        if not root or not root.get("path"):
+            return None
+        root_path = root["path"]
+        base_tags = (root.get("tags") or "").split()
+        caption = captioning.compose(
+            item.path, root_path,
+            resolver=TagResolver(root_path),
+            base_tags=base_tags,
+            book_caption=item.caption,
+        )
+        return caption or None
+    except Exception as e:                      # composing must never crash a pass
+        log.debug("backup: caption compose failed id=%s: %s", item.id, e)
+        return None
+
+
+def _safe_store(backend: StorageBackend, path: Path, content_hash: str,
+                caption: str | None) -> "tuple[Locator | None, str | None]":
+    """Run one backend.store off-thread, capturing any error as a string. A
+    backend bug must never crash the whole pass. `caption` is honoured only by
+    the fast-access tier (Telegram); durable backends ignore it."""
+    try:
+        return backend.store(path, content_hash, caption=caption), None
     except BackendError as e:
         return None, str(e)
     except Exception as e:                      # defensive
@@ -78,10 +106,28 @@ def backup_item(store: ItemStore, registry: Registry, policy: RoutingPolicy,
     todo = [n for n in available if n not in already]
 
     results: dict[str, tuple[Locator | None, str | None]] = {}
-    if todo:
-        with ThreadPoolExecutor(max_workers=len(todo)) as ex:
+    # AVOID DUP UPLOAD: if these exact bytes already live on a backend (stored by
+    # ANY row), reuse that locator instead of re-uploading — the durable backends
+    # are content-addressed (the ref IS the hash) and a Telegram message points at
+    # identical bytes, so the shared copy is interchangeable. A reused DURABLE copy
+    # is still re-verified below (the integrity gate), so a corrupt share can't be
+    # silently trusted.
+    real_todo: list[str] = []
+    for name in todo:
+        ref = store.location_ref_for_hash(item.content_hash, name,
+                                          exclude_item=item.id)
+        if ref is not None:
+            results[name] = (Locator(name, ref), None)
+            log.info("backup: id=%d reuse existing %s copy (dup bytes, no upload)",
+                     item.id, name)
+        else:
+            real_todo.append(name)
+
+    if real_todo:
+        caption = _caption_for(store, item)     # composed once, at send time
+        with ThreadPoolExecutor(max_workers=len(real_todo)) as ex:
             futs = {ex.submit(_safe_store, registry.get(n), path,
-                              item.content_hash): n for n in todo}
+                              item.content_hash, caption): n for n in real_todo}
             for fut in as_completed(futs):
                 results[futs[fut]] = fut.result()
 

@@ -62,7 +62,11 @@ class TelegramBackend:
         """Drive the client's event loop to completion (sync facade)."""
         return self._client.loop.run_until_complete(coro)
 
-    def store(self, path: Path, content_hash: str) -> Locator:
+    def store(self, path: Path, content_hash: str, *,
+              caption: str | None = None) -> Locator:
+        # Telegram is the fast-access tier — it's the one backend that carries the
+        # composed `caption` (folder taxonomy / ISBN metadata), so the message is
+        # human-readable AND findable in-chat. Empty/None → no caption sent.
         path = Path(path)
         try:
             size = path.stat().st_size
@@ -74,7 +78,8 @@ class TelegramBackend:
                 f"{self._max}-byte single-message limit (splitting not yet "
                 f"implemented; a durable cloud backend still holds it)")
         try:
-            msg = self._run(self._client.send_file(self._dest, str(path)))
+            msg = self._run(self._client.send_file(self._dest, str(path),
+                                                   caption=caption or None))
         except Exception as e:                       # telethon raises a broad set
             raise BackendError(f"telegram store failed for {path}: {e}") from e
         return Locator(self.name, str(msg.id))
