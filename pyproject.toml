@@ -19,6 +19,9 @@ books-ocr = [                            # scanned/image-only PDFs
 ]
 # Online ISBN lookup uses stdlib urllib — no `requests` dependency.
 
+[project.scripts]
+librarian = "librarian.cli:main"
+
 # `uv run pytest` — the standalone tests/ scripts are also pytest-collectable.
 [dependency-groups]
 dev = ["pytest>=8"]

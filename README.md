@@ -27,6 +27,22 @@ Early build — see [PLAN.md](PLAN.md) for the phased roadmap and what's done.
 | 8 | Standalone dedup pass + protection policy + no-dup-upload | ✅ |
 | 9 | iCloud-aware ingest (evicted-file policy + HSM guard) | ✅ |
 | 10 | Full-cycle orchestration (`worker.full_cycle`, fail-soft stages) | ✅ |
+| 11 | Bootstrap + `librarian` CLI (root/scan/cycle/status/find) | ✅ |
+
+## Quick start
+
+```sh
+uv pip install -e ".[telegram,books]"      # extras optional; core: zero deps
+librarian root add Ebooks ~/Documents/Ebooks --tags "#books"
+librarian scan                             # discover (iCloud: report_only)
+librarian cycle                            # heal → scan → enrich → backup
+librarian cycle --offload                  # + reclaim disk (durable-verified)
+librarian status && librarian find "query"
+```
+
+Backends live in `~/.config/librarian/config.toml` (`[backends.<name>]` with
+`type = "local" | "rclone" | "telegram"`); see `librarian/bootstrap.py` for the
+exact keys. Telegram needs a one-time `librarian telegram-login`.
 
 ## Design docs
 

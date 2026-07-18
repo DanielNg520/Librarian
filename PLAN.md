@@ -282,6 +282,33 @@ so a daemon/cron line gets the whole machine, each stage fail-soft.
   containment (heal explodes → recorded, backup still ships). **All passing.**
   Suite total: 316 script checks / 84 pytest tests.
 
+## Phase 11 — bootstrap + CLI (`librarian` command)  ✅ *(done 2026-07-18)*
+The library becomes a tool: config → wired objects, and a thin argparse layer.
+- ✅ `bootstrap.py` — the `from_config` factory the registry docstring promised:
+  `registry_from_config` builds `[backends.*]` (local / rclone / telegram — the
+  Telegram backend starts its OWN Telethon session and refuses unauthorized ones
+  with a pointer to `telegram-login`); each backend constructs FAIL-SOFT (missing
+  dep / bad section / typo'd type → loud skip; routed items stay PENDING).
+  `assemble(store)` → (Registry, RoutingPolicy, DeletionGuard-with-Protection)
+  from one config read — CLI, daemon, and scripts wire identically.
+- ✅ `cli.py` + `__main__.py` + `[project.scripts] librarian` — THIN by rule (open
+  store → bootstrap → call ONE library function → print its report): `root
+  add/list/remove`, `scan [ROOT] [--icloud …]`, `cycle [--dedup] [--offload]
+  [--dry-run] [--no-heal/scan/enrich]`, `dedup` (dry-run unless `--live`),
+  `status`, `find`, `telegram-login` (one-time interactive auth). Safety posture
+  = library defaults: deleting stages opt-in, iCloud report_only. Paths honor
+  `$LIBRARIAN_DB` / `$LIBRARIAN_CONFIG`.
+- ✅ **Verify:** `PYTHONPATH=. python3 tests/test_cli.py` — 23 checks: fail-soft
+  backend construction (well-formed survives; unknown type / missing key /
+  wrong-typed value are skips; missing config → empty registry), assemble wiring
+  (routing + protection-guard actually refuse), CLI end-to-end via `main(argv)`
+  (root add/list/remove exit codes, scan ingests, status counts + honest
+  no-backends warning, find hit/miss, cycle collapses a byte-twin + ships,
+  `--offload` reclaims the file, dedup announces dry-run, malformed config never
+  crashes a command). Plus a live `python -m librarian` smoke: ingest → enrich →
+  backup → heal → offload → disk reclaimed. **All passing.** Suite total: 339
+  script checks / 89 pytest tests.
+
 ## Cross-cutting
 - ⬚ Keep `librarian/DESIGN.md` + this plan current as phases land; maintain a
   `librarian/README.md` once the binary exists.
