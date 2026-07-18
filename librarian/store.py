@@ -259,6 +259,35 @@ class ItemStore:
             (item_id,)).fetchall()
         return [Location.from_row(r) for r in rows]
 
+    def location_ref_for_hash(self, content_hash: str, backend: str,
+                              *, exclude_item: int | None = None) -> str | None:
+        """The locator ref for these exact bytes already stored on `backend` by
+        ANY item, or None. Lets the backup pass skip re-uploading byte-identical
+        content that a different row already delivered — the durable backends are
+        content-addressed (the ref IS the hash), and the Telegram message points
+        at identical bytes, so reusing the ref is always safe. `exclude_item`
+        omits one row (the item being backed up itself)."""
+        if not content_hash:
+            return None
+        sql = ("SELECT l.locator AS ref FROM locations l "
+               "JOIN items i ON i.id = l.item_id "
+               "WHERE i.content_hash = ? AND l.backend = ?")
+        params: list = [content_hash, backend]
+        if exclude_item is not None:
+            sql += " AND l.item_id != ?"
+            params.append(exclude_item)
+        sql += " LIMIT 1"
+        r = self.conn.execute(sql, params).fetchone()
+        return r["ref"] if r else None
+
+    def items_for_root(self, root: str) -> list[Item]:
+        """Every tracked item registered under `root`, oldest first. Used by the
+        standalone dedup pass to collapse byte-identical LOCAL copies."""
+        rows = self.conn.execute(
+            "SELECT * FROM items WHERE root = ? ORDER BY discovered_at",
+            (root,)).fetchall()
+        return [Item.from_row(r) for r in rows]
+
     # ── roots ────────────────────────────────────────────────────────────────
     def add_root(self, name: str, path: str, *, destination: str | None = None,
                  tags: str | None = None) -> bool:
