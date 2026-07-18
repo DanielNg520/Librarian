@@ -29,7 +29,7 @@ from librarian.heal import HealOutcome, heal_item, heal_pass       # noqa: E402
 from librarian.models import Status                                # noqa: E402
 from librarian.routing import RoutingPolicy                        # noqa: E402
 from librarian.store import ItemStore                              # noqa: E402
-from librarian.worker import run_once                              # noqa: E402
+from librarian.worker import CycleReport, full_cycle, run_once     # noqa: E402
 
 _passed = 0
 
@@ -49,7 +49,7 @@ class FakeTelegram:
     def __init__(self):
         self._have: set[str] = set()
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         self._have.add(content_hash)
         return Locator(self.name, content_hash)
 
@@ -69,7 +69,7 @@ class ErroringBackend:
     name = "flaky"
     durable = True
 
-    def store(self, path, content_hash):
+    def store(self, path, content_hash, *, caption=None):
         return Locator(self.name, content_hash)
 
     def fetch(self, locator, dest):
@@ -246,10 +246,87 @@ def test_run_once_full_cycle() -> None:
         s.close()
 
 
+# ── full_cycle: every pass wired end-to-end, fail-soft per stage ────────────
+def test_full_cycle_end_to_end() -> None:
+    """discover → enrich (book caption) → dedup (collapse a stray) → backup →
+    offload, all in ONE call, every seam exercised for real."""
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        root = td / "Root"
+        # a book, a photo, and an untracked byte-twin of the book
+        make(root / "shelf" / "novel.pdf", b"%PDF" + b"B" * 400)
+        make(root / "shelf" / "novel copy.pdf", b"%PDF" + b"B" * 400)
+        make(root / "pics" / "pic.jpg", b"JPG" * 200)
+        s = ItemStore.open(str(td / "l.db"))
+        roots.register(s, "Root", root)
+
+        reg = Registry({"disk": LocalBackend(td / "disk", name="disk"),
+                        "tg": FakeTelegram()})
+        pol = RoutingPolicy({"default": ["disk", "tg"]})
+
+        rep = full_cycle(s, reg, pol, DeletionGuard(),
+                         dedup=True, offload=True, enrich_online=False,
+                         enrich_ocr=False)
+        check(isinstance(rep, CycleReport) and rep.ok,
+              f"cycle clean, got errors={rep.errors}")
+        check(len(rep.scans) == 1 and rep.scans[0].inserted >= 2,
+              f"scan discovered the files, got {rep.scans}")
+        # ingest-time collapse killed the byte-twin: exactly ONE row holds those
+        # bytes (2 items total: book + pic), and offload later reclaimed both.
+        check(s.count_by_status() == 2,
+              f"twin collapsed to one row, got {s.count_by_status()} items")
+        # the book got a caption BEFORE backup shipped it
+        check(rep.enrich is not None and rep.enrich.enriched >= 1,
+              f"book enriched in-cycle, got {rep.enrich}")
+        book_id = (s.id_of(str(root / "shelf" / "novel.pdf"))
+                   or s.id_of(str(root / "shelf" / "novel copy.pdf")))
+        check(book_id is not None and s.get(book_id).caption is not None,
+              "book caption written pre-send")
+        check(rep.backup is not None and rep.backup.backed_up == 2,
+              f"both items backed up, got {rep.backup}")
+        check(rep.offload is not None and rep.offload.offloaded == 2,
+              f"both offloaded after durable verify, got {rep.offload}")
+
+        # steady state: a second cycle is a no-op and still clean
+        rep2 = full_cycle(s, reg, pol, DeletionGuard(),
+                          dedup=True, offload=True, enrich_online=False,
+                          enrich_ocr=False)
+        check(rep2.ok and rep2.backup.backed_up == 0
+              and rep2.offload.offloaded == 0,
+              f"second cycle idempotent, got {rep2}")
+        s.close()
+
+
+def test_full_cycle_stage_crash_is_contained() -> None:
+    """A crashing stage is recorded, NOT raised — and backup still runs."""
+    import librarian.worker as worker_mod
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        s, root = setup(td, {"doc.pdf": b"PDF" * 200})
+        reg = Registry({"disk": LocalBackend(td / "disk", name="disk")})
+        pol = RoutingPolicy({"document": ["disk"]})
+
+        orig = worker_mod.heal_pass
+        worker_mod.heal_pass = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("heal exploded"))
+        try:
+            rep = full_cycle(s, reg, pol, DeletionGuard(), scan=False,
+                             enrich=False)
+        finally:
+            worker_mod.heal_pass = orig
+        check(not rep.ok and any("heal" in e for e in rep.errors),
+              f"crash recorded, got {rep.errors}")
+        check(rep.backup is not None and rep.backup.backed_up == 1,
+              f"backup still shipped despite the heal crash, got {rep.backup}")
+        s.close()
+
+
 def main() -> int:
     for fn in (test_heal_intact, test_heal_rearm_and_reship,
                test_heal_corruption, test_heal_transient_error_keeps_claim,
-               test_heal_lost_detection, test_run_once_full_cycle):
+               test_heal_lost_detection, test_run_once_full_cycle,
+               test_full_cycle_end_to_end,
+               test_full_cycle_stage_crash_is_contained):
         fn()
         print(f"  ✓ {fn.__name__}")
     print(f"\nlibrarian worker/heal — all {_passed} checks passed.")

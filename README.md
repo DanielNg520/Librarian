@@ -21,8 +21,12 @@ Early build — see [PLAN.md](PLAN.md) for the phased roadmap and what's done.
 | 2 | Photo captions (folder taxonomy + dependency-free EXIF) | ✅ |
 | 3 | Storage backends (Telegram + rclone clouds + local) + filetype routing | ✅ |
 | 4 | Backup fan-out + offload (HSM) | ✅ |
-| 5 | Librarian bot — find / serve / restore | — |
-| 6 | Book enrichment (ISBN ladder) | — |
+| 5 | Librarian bot — find / serve / restore | ✅ |
+| 6 | Book enrichment (ISBN ladder) | ✅ |
+| 7 | Generalized captions (any filetype) + Telegram send seam | ✅ |
+| 8 | Standalone dedup pass + protection policy + no-dup-upload | ✅ |
+| 9 | iCloud-aware ingest (evicted-file policy + HSM guard) | ✅ |
+| 10 | Full-cycle orchestration (`worker.full_cycle`, fail-soft stages) | ✅ |
 
 ## Design docs
 

@@ -163,12 +163,139 @@ Copy-and-adapt the proven spine into Librarian; stand up `librarian.db`.
   findable, idempotent skip, ladder-crash swallowed). **All passing.** Suite
   total: 213 checks.
 
+## Phase 7 — generalize captions + close the send seam  ✅ *(done 2026-07-18)*
+The composers existed but were unwired: `compose_caption` (photos) was only
+tested, never called, and `TelegramBackend.store()` sent `send_file(dest, path)`
+with NO caption. This phase makes the folder taxonomy caption ANY file type and
+makes that caption actually ride the Telegram upload. Pure-logic first, then one
+back-compatible backend seam.
+- ✅ `captioning/_compose.py` — the shared caption spine: `path_segments`,
+  `description`, `segment_tags`, `merge_tags`, `display_date` (mtime), and
+  `folder_lines()` (the `description` + `#hashtags` pair). photo/book/generic all
+  delegate here, so the taxonomy→caption + slug rule can't drift. `photo.py` keeps
+  its EXIF date and re-exports the neutral names (public API preserved); `book.py`
+  now builds its lead lines then calls `folder_lines`.
+- ✅ `captioning/generic.py` — `compose_generic_caption(path, root_path, *,
+  resolver, base_tags)`: mtime date line + shared folder lines. Identical to a
+  photo caption minus EXIF, so nothing ever ships caption-less.
+- ✅ `captioning.compose(path, root_path, *, resolver, base_tags, book_caption)` —
+  the ONE dispatcher the send path calls: photo → `compose_caption`; book →
+  `book_caption` (the enriched `items.caption`) if present, else generic fallback;
+  other → generic. Pure/testable — caller supplies root_path/tags/resolver.
+- ✅ `backends/base.py` protocol + local/rclone/telegram — `store(path,
+  content_hash, *, caption=None)`. Telegram threads `caption=` into `send_file`;
+  durable backends accept-and-ignore (bytes are the payload). Default None → fully
+  back-compatible.
+- ✅ `backup.py` — `_caption_for(store, item)` composes ONCE at send (so a later
+  `.tags`/folder-move edit is reflected), fail-soft to None (never blocks
+  delivery), passed through `_safe_store` to every backend's `store()`.
+- ✅ **Verify:** `PYTHONPATH=. python3 tests/test_send_caption.py` — 14 checks:
+  generic 3-line shape + all-digit-segment slug drop, layered base/segment/sidecar
+  tags, dispatcher routing (photo == compose_caption, book-enriched verbatim,
+  book-unenriched → generic, other → generic), send seam (composed caption reaches
+  the fake Telegram store exactly once + durable copy still stored), and fail-soft
+  (unknown root → None, no raise). Existing test fakes updated to the new `store`
+  signature. **All passing.** Suite total: 251 checks.
+
+## Phase 8 — standalone dedup pass + protection policy + no-dup-upload  ✅ *(done 2026-07-18)*
+Ported the suite's dedup + safebrake, OPTIMIZED for Librarian: every row already
+carries `content_hash`, so grouping is DB-driven and disk hashing runs only on
+untracked stragglers. Winner stays Librarian's simplified rule.
+- ✅ `dedup.py` — `dedup_root(store, guard, root, *, dry_run=True)` + `dedup_pass`
+  (all roots). A cheap SIZE prefilter isolates candidates; each candidate's full
+  hash is REUSED from its `items` row when tracked, computed only for untracked
+  strays (the suite's separate partial stage is redundant once the DB carries full
+  hashes). Groups by hash, `_pick_winner` (tracked → earliest-discovery → path)
+  makes the survivor deterministic across re-scans. Emits `DedupReport` (dry-run =
+  PLANNED counts + `bytes_freed`). **INVARIANT proven in code+tests:** a tracked
+  row always outranks an untracked file, so a backed-up row is never orphaned —
+  there is no adopt-the-orphan case (the suite needed one; Librarian doesn't).
+- ✅ `deletion.py` — `ProtectionPolicy` (a plain callable: `pause` blocks every
+  delete; else protect a path under any registered-root folder / explicit prefix),
+  `ProtectionPolicy.load(store, path)` reads `[protect]` from config.toml the same
+  reload-on-load way `RoutingPolicy.load` does — NO separate PolicyStore process.
+  `DeletionGuard(policy=…)` (or legacy `protect=…`) stays the one chokepoint;
+  offload AND `dedup_root` route through it. Default = nothing protected.
+- ✅ Avoid dup upload — `store.location_ref_for_hash(hash, backend, exclude_item)`;
+  `backup_item` reuses an existing backend copy's locator instead of re-uploading
+  byte-identical content (content-addressed durable refs + identical Telegram
+  bytes are interchangeable). A reused DURABLE copy is still re-verified by the
+  existing integrity gate, so a corrupt share can't be silently trusted.
+- ✅ **Verify:** `PYTHONPATH=. python3 tests/test_dedup_pass.py` — 29 checks:
+  tracked-twin collapse (dry-run predicts, live deletes loser row), untracked
+  straggler removal + winner determinism across a re-run (no re-created dup),
+  tracked-beats-untracked invariant (backup row + locations preserved), protection
+  (prefix + pause + config `roots` resolution + absent config), dedup respects the
+  guard on a protected root, dup-upload skip (no second `store()`, both locations
+  still recorded), and `dedup_pass` over all roots. ⚠ `dedup_root` only ever
+  removes a REDUNDANT local copy while an identical one remains — distinct from
+  offload, so it needs no durable-backup gate. **All passing.** Suite total: 280.
+
+## Phase 9 — iCloud-aware ingest  ✅ *(done 2026-07-18)*
+Before this, an evicted `.name.icloud` stub was hidden→invisible (never backed
+up), and a dataless file got materialized ACCIDENTALLY by the hash read (blocking,
+metered, re-filling the disk offload just freed). The download/skip decision is
+now explicit, and HSM no longer fights iCloud. Every OS probe is injected, so the
+whole phase tests off macOS.
+- ✅ `icloud.py` (pure, guarded) — `placeholder_state(path, *, stat_fn)` →
+  `MATERIALIZED | DATALESS | EVICTED_STUB` (stub = `.…​.icloud` by name; dataless
+  via `st_blocks==0 && st_size>0`, the reliable no-pyobjc signal; unstattable →
+  fail-open to MATERIALIZED so a real file is never wrongly hidden). Plus
+  `is_stub`, `original_name`/`original_path`, `is_evicted`, and
+  `materialize(path, …)` (`brctl download` + bounded poll; runner/state/clock/sleep
+  all injectable; never raises — fails soft to False on a missing `brctl` or a
+  timeout).
+- ✅ `roots.scan(…, icloud_policy="report_only")` — classifies each path (STUBS
+  included, before the hidden-file filter that used to lose them) BEFORE any
+  content read. `report_only` (default, safe) surfaces evicted files in the new
+  `ScanReport.cloud_only` and never downloads; `materialize` downloads then
+  ingests the real file; `skip` ignores them silently. An invalid policy raises.
+- ✅ `offload.py` — `offload_item` returns the new `CLOUD_MANAGED` outcome and
+  leaves an already-evicted file in place: there's no local disk to reclaim, and
+  unlinking the placeholder could delete the file from iCloud Drive across every
+  device — so HSM can't loop download→hash→offload→evict→download.
+- ✅ **Verify:** `PYTHONPATH=. python3 tests/test_icloud.py` — 26 checks: stub name
+  parsing, dataless/materialized/stub/fail-open classification (injected stat),
+  `materialize` success/fail-soft/timeout (injected runner + clock, no real sleep),
+  the three scan policies (report_only surfaces + never reads, skip silent,
+  materialize→ingest), stub no-longer-invisible, and offload refusing to evict a
+  cloud-managed file (status + file preserved). **All passing.** Suite total: 306.
+
+## Phase 10 — full-cycle orchestration (facade)  ✅ *(done 2026-07-18)*
+Phases 7–9 left the passes hand-composed; this wires every pass into ONE facade
+so a daemon/cron line gets the whole machine, each stage fail-soft.
+- ✅ `worker.full_cycle(store, registry, policy, guard, …)` → `CycleReport` —
+  stages in dependency order **heal → scan → enrich → dedup → backup → offload**
+  (heal re-arms for the SAME cycle's backup; enrich runs BEFORE backup so the
+  first upload already carries the ISBN caption; dedup collapses before ship;
+  offload last). Each stage runs through `_stage` (fail-soft: a crash is logged
+  + recorded in `CycleReport.errors`, later stages still run — a scan hiccup
+  must never stop backup from shipping). Defaults = the safe automation set
+  (heal/scan/enrich/backup on; the DELETING stages dedup/offload opt-in;
+  iCloud `report_only`). `run_once` unchanged (back-compat).
+- ✅ pytest bridge parity — `tests/conftest.py` gains `patch_attr` +
+  `monkeypatch_state` fixtures mirroring the script harness, so every test file
+  passes under BOTH `python3 tests/test_X.py` and `pytest`.
+- ✅ **Verify:** `PYTHONPATH=. python3 tests/test_worker.py` — full_cycle
+  end-to-end (discover → enrich-before-send → twin collapse → fan-out →
+  durable-verified offload, then an idempotent second cycle) and stage-crash
+  containment (heal explodes → recorded, backup still ships). **All passing.**
+  Suite total: 316 script checks / 84 pytest tests.
+
 ## Cross-cutting
 - ⬚ Keep `librarian/DESIGN.md` + this plan current as phases land; maintain a
   `librarian/README.md` once the binary exists.
 - ⬚ Each vendored file names its suite origin so future drift is auditable.
+- ⬚ Phases 7–9 update `README.md`'s phase table and DESIGN §§ (send seam, dedup
+  pass, protection policy, iCloud policy) as each lands.
 
 ## Order rationale
 0 first (zero-risk pure logic, proves the package). 1 (own spine) before anything
 touching files. 3 (backends) before 4 (offload) so the delete only happens once
 fan-out + verify are trustworthy. 5 is the payoff; 6 is independent.
+
+7 before 8/9: it closes an already-open gap (composers wired to nothing) and is
+the most self-contained (pure functions + one back-compatible backend signature).
+8 builds on the dedup already present and hardens deletes before 9 leans on them.
+9 last: most macOS-environment-dependent, so it ships with the most careful
+injection-based testing once the delete/protection paths are trustworthy.
