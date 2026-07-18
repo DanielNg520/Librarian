@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from . import icloud
 from .backends.base import BackendError, Locator
 from .backends.registry import Registry
 from .deletion import DeletionGuard
@@ -46,6 +47,7 @@ class OffloadOutcome(str, Enum):
     UNVERIFIED    = "unverified"       # no durable backend verifies → kept (safe)
     NOT_BACKED_UP = "not_backed_up"    # wrong status → skipped
     REFUSED       = "refused"          # DeletionGuard refused (protected) → kept
+    CLOUD_MANAGED = "cloud_managed"    # iCloud already evicted the bytes → kept
 
 
 def _durable_verified(store: ItemStore, registry: Registry, item):
@@ -73,6 +75,14 @@ def offload_item(store: ItemStore, registry: Registry, guard: DeletionGuard,
     """Offload one item, enforcing the durable-verified gate."""
     if item.status != Status.BACKED_UP.value:
         return OffloadOutcome.NOT_BACKED_UP
+
+    # HSM must not fight iCloud: if the OS already evicted the bytes, there's no
+    # local disk to reclaim, and unlinking the placeholder could remove the file
+    # from iCloud Drive across every device. Leave it — offload is a no-op here.
+    if icloud.is_evicted(icloud.placeholder_state(item.path)):
+        log.info("offload: id=%d is iCloud-managed (evicted) — leaving in place",
+                 item.id)
+        return OffloadOutcome.CLOUD_MANAGED
 
     verified = _durable_verified(store, registry, item)
     if verified is None:
@@ -108,6 +118,7 @@ class OffloadReport:
     unverified:    int = 0
     not_backed_up: int = 0
     refused:       int = 0
+    cloud_managed: int = 0
     bytes_freed:   int = 0
 
     def record(self, outcome: OffloadOutcome, item) -> None:
