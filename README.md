@@ -12,7 +12,8 @@ from your folder taxonomy (photos) and ISBN metadata (books), no model required.
 
 ## Status
 
-Early build — see [PLAN.md](PLAN.md) for the phased roadmap and what's done.
+Core complete and usable via the CLI — see [PLAN.md](PLAN.md) for the build
+history and per-phase verification.
 
 | Phase | What | State |
 |------:|------|-------|
@@ -40,23 +41,60 @@ librarian cycle --offload                  # + reclaim disk (durable-verified)
 librarian status && librarian find "query"
 ```
 
-Backends live in `~/.config/librarian/config.toml` (`[backends.<name>]` with
-`type = "local" | "rclone" | "telegram"`); see `librarian/bootstrap.py` for the
-exact keys. Telegram needs a one-time `librarian telegram-login`.
+The deleting stages (`--dedup`, `--offload`) are opt-in everywhere, `dedup` is
+dry-run unless `--live`, and iCloud-evicted files default to `report_only`
+(surfaced in the scan report, never downloaded or deleted).
+
+## Configuration — `~/.config/librarian/config.toml`
+
+```toml
+[backends.disk]                # durable: hash-verified local/NAS copy
+type = "local"
+path = "/Volumes/NAS/librarian"
+
+[backends.gdrive]              # durable: any rclone remote (`rclone config`)
+type = "rclone"
+remote = "gdrive:"
+base   = "librarian"
+
+[backends.telegram]            # fast-access tier (presence-only; never gates offload)
+type = "telegram"              # one-time auth: `librarian telegram-login`
+api_id = 12345
+api_hash = "…"
+session = "~/.config/librarian/telegram.session"
+destination = "me"
+
+[backup.routing]               # filetype bucket → ordered backend names
+default  = ["gdrive", "telegram"]
+document = ["gdrive", "telegram"]
+
+[protect]                      # the deletion safebrake
+pause = false                  # true = block EVERY delete
+roots = []                     # root names shielded from offload/dedup
+paths = []                     # absolute path prefixes, likewise
+```
+
+A misconfigured or missing backend is skipped loudly — items routed to it stay
+pending until it works; nothing crashes. Override paths for tests/automation
+with `$LIBRARIAN_DB` and `$LIBRARIAN_CONFIG`.
 
 ## Design docs
 
-- [DESIGN.md](DESIGN.md) — working spec (modules, seams, invariants)
-- [PLAN.md](PLAN.md) — phased build sequence
+- [DESIGN.md](DESIGN.md) — as-built spec (pipeline, modules, self-healing, invariants)
+- [PLAN.md](PLAN.md) — phased build history + per-phase verification
 - [docs/adr/0001-…](docs/adr/0001-librarian-multi-backend-hsm-and-folder-metadata.md) — the decision record
 
 ## Develop / test
 
+Every test file runs standalone **and** under pytest (equivalent via the
+`tests/conftest.py` bridge):
+
 ```sh
-PYTHONPATH=. python3 tests/test_tags.py
-PYTHONPATH=. python3 tests/test_ingest.py
-PYTHONPATH=. python3 tests/test_captioning.py
+pytest tests/                                  # the whole suite
+PYTHONPATH=. python3 tests/test_worker.py      # or any single file, no pytest
 ```
 
-Requires Python ≥ 3.13. Runtime dependencies (telethon, rclone, …) are added per
-phase as they land; the core spine has none.
+Requires Python ≥ 3.13. The core spine has **zero runtime dependencies**;
+optional extras per feature: `[telegram]` (telethon), `[books]` (pypdf),
+`[books-ocr]` (pdf2image + pytesseract). A missing extra disables just that
+feature — never the process.

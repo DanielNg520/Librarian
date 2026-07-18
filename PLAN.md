@@ -310,11 +310,13 @@ The library becomes a tool: config → wired objects, and a thin argparse layer.
   script checks / 89 pytest tests.
 
 ## Cross-cutting
-- ⬚ Keep `librarian/DESIGN.md` + this plan current as phases land; maintain a
-  `librarian/README.md` once the binary exists.
-- ⬚ Each vendored file names its suite origin so future drift is auditable.
-- ⬚ Phases 7–9 update `README.md`'s phase table and DESIGN §§ (send seam, dedup
-  pass, protection policy, iCloud policy) as each lands.
+- ✅ `DESIGN.md` rewritten as the as-built spec (2026-07-18): full-cycle
+  pipeline, as-built module map, self-healing stance, invariants incl. Phases
+  7–11. `README.md` carries the phase table, quick start, and full config
+  reference. ADR-0001 marked Accepted.
+- ✅ Each vendored file names its suite origin so future drift is auditable.
+- ⬚ Keep all three current as future phases land (daemon wrapper, `librarian
+  bot` entry, Telegram part-splitting are the queued ones — DESIGN §8).
 
 ## Order rationale
 0 first (zero-risk pure logic, proves the package). 1 (own spine) before anything

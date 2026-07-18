@@ -1,6 +1,6 @@
 # ADR-0001: Librarian — multi-backend backup tier, on-demand retrieval, and folder-driven metadata
 
-**Status:** Proposed (revised 2026-06-26 — decoupled to an independent app)
+**Status:** Accepted — implemented through Phase 11 (2026-07-18); as-built spec: `DESIGN.md`
 **Date:** 2026-06-26
 **Deciders:** Daniel (owner)
 **Relates to:** the existing suite (`archiver`, `recorder`, `dispatcher`, `ops`, `core`) as a *source of copyable patterns only*; see `DESIGN.md`, `PROJECT_MAP.md`.
